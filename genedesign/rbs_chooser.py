@@ -1,53 +1,86 @@
 from genedesign.models.rbs_option import RBSOption
+from genedesign.seq_utils.hairpin_counter import hairpin_counter
+from genedesign.seq_utils.Translate import Translate
+from genedesign.seq_utils.calc_edit_distance import calculate_edit_distance
+
+from typing import Set
 
 class RBSChooser:
     """
-    A simple RBS selection algorithm that chooses an RBS from a list of options, excluding any RBS in the ignore set.
+    A class to choose the best RBS for a given CDS sequence.
     """
+    # Class variable to store RBS options
+    rbs_options: Set[RBSOption] = set()  # Initialize with an empty set
 
-    def __init__(self):
-        self.rbsOptions = []
+    def initiate(self, rbs_option_list: Set[RBSOption]) -> None:
+        """
+        Initialization method for RBSChooser.
+        It populates the class variable with RBS options.
 
-    def initiate(self) -> None:
-        """
-        Populates the RBS options list with predefined options.
-        """
-        # Add RBS options based on their sequences and properties
-        opt1 = RBSOption(
-            utr="aaagaggagaaatactag",
-            cds="atggcttcctccgaagacgttatcaaagagttcatgcgtttcaaagttcgtatggaaggttccgttaacggtcacgagttcgaaatcgaaggtgaaggtgaaggtcgtccgtacgaaggtacccagaccgctaaactgaaagttaccaaaggtggtccgctgccgttcgcttgggacatcctgtccccgcagttccagtacggttccaaagcttacgttaaacacccggctgacatcccggactacctgaaactgtccttcccggaaggtttcaaatgggaacgtgttatgaacttcgaagacggtggtgttgttaccgttacccaggactcctccctgcaagacggtgagttcatctacaaagttaaactgcgtggtaccaacttcccgtccgacggtccggttatgcagaaaaaaaccatgggttgggaagcttccaccgaacgtatgtacccggaagacggtgctctgaaaggtgaaatcaaaatgcgtctgaaactgaaagacggtggtcactacgacgctgaagttaaaaccacctacatggctaaaaaaccggttcagctgccgggtgcttacaaaaccgacatcaaactggacatcacctcccacaacgaagactacaccatcgttgaacagtacgaacgtgctgaaggtcgtcactccaccggtgcttaa",
-            gene_name="BBa_b0034",
-            first_six_aas="MASSED"
-        )
-        opt2 = RBSOption(
-            utr="tcacacaggaaagtactag",
-            cds="atgactcaacgtatcgcatatgtaactggtggtatgggtggtatcggtactgcaatttgccagcgtctggcgaaagacggtttccgtgttgttgcgggctgcggtccgaactccccgcgtcgtgaaaagtggctggaacaacagaaagccctgggcttcgacttcattgcctccgagggtaatgtagctgactgggattccaccaagactgccttcgataaagttaaatctgaagtgggcgaagtagatgtactgatcaacaacgccggtattactcgtgatgtcgtattccgcaaaatgacccgtgcagactgggatgcagttatcgacaccaacctgacgtctctgttcaacgttaccaaacaggttattgatggtatggctgaccgtggctggggccgcatcgtgaacatctctagcgttaacggccaaaaaggccaatttggtcagacgaattacagcacggctaaagcaggcctgcacggtttcaccatggcactggcgcaggaagtggcgaccaaaggtgttaccgttaataccgtttctccaggttacatcgccaccgatatggttaaggctatccgccaagatgttctggacaagatcgtggctaccattccggttaaacgcctgggcctgccggaagaaattgcgtccatctgtgcgtggctgagctccgaagagtctggtttttccaccggtgcggatttctctctgaacggtggtctgcacatgggttga",
-            gene_name="BBa_b0032",
-            first_six_aas="MTQRIA"
-        )
-        opt3 = RBSOption(
-            utr="CCATACCCGTTTTTTTGGGCTAACAGGAGGAATTAAcc",
-            cds="atgGacacAattaacatcgctaagaacgacttctctgacatcgaactggctgctatcccgttcaacactctggctgaccattacggtgagcgtttagctcgcgaacagttggcccttgagcatgagtcttacgagatgggtgaagcacgcttccgcaagatgtttgagcgtcaacttaaagctggtgaggttgcggataacgctgccgccaagcctctcatcactaccctactccctaagatgattgcacgcatcaacgactggtttgaggaagtgaaagctaagcgcggcaagcgcccgacagccttccagttcctgcaagaaatcaagccggaagccgtagcgtacatcaccattaagaccactctggcttgcctaaccagtgctgacaatacaaccgttcaggctgtagcaagcgcaatcggtcgggccattgaggacgaggctcgcttcggtcgtatccgtgaccttgaagctaagcacttcaagaaaaacgttgaggaacaactcaacaagcgcgtagggcacgtctacaagaaagcatttatgcaagttgtcgaggctgacatgctctctaagggtctactcggtggcgaggcgtggtcttcgtggcataaggaagactctattcatgtaggagtacgctgcatcgagatgctcattgagtcaaccggaatggttagcttacaccgccaaaatgctggcgtagtaggtcaagactctgagactatcgaactcgcacctgaatacgctgaggctatcgcaacccgtgcaggtgcgctggctggcatctctccgatgttccaaccttgcgtagttcctcctaagccgtggactggcattactggtggtggctattgggctaacggtcgtcgtcctctggcgctggtgcgtactcacagtaagaaagcactgatgcgctacgaagacgtttacatgcctgaggtgtacaaagcgattaacattgcgcaaaacaccgcatggaaaatcaacaagaaagtcctagcggtcgccaacgtaatcaccaagtggaagcattgtccggtcgaggacatccctgcgattgagcgtgaagaactcccgatgaaaccggaagacatcgacatgaatcctgaggctctcaccgcgtggaaacgtgctgccgctgctgtgtaccgcaaggacaaggctcgcaagtctcgccgtatcagccttgagttcatgcttgagcaagccaataagtttgctaaccataaggccatctggttcccttacaacatggactggcgcggtcgtgtttacgctgtgtcaatgttcaacccgcaaggtaacgatatgaccaaaggactgcttacgctggcgaaaggtaaaccaatcggtaaggaaggttactactggctgaaaatccacggtgcaaactgtgcgggtgtcgataaggttccgttccctgagcgcatcaagttcattgaggaaaaccacgagaacatcatggcttgcgctaagtctccactggagaacacttggtgggctgagcaagattctccgttctgcttccttgcgttctgctttgagtacgctggggtacagcaccacggcctgagctataactgctcccttccgctggcgtttgacgggtcttgctctggcatccagcacttctccgcgatgctccgagatgaggtaggtggtcgcgcggttaacttgcttcctagtgaaaccgttcaggacatctacgggattgttgctaagaaagtcaacgagattctacaagcagacgcaatcaatgggaccgataacgaagtagttaccgtgaccgatgagaacactggtgaaatctctgagaaagtcaagctgggcactaaggcactggctggtcaatggctggcttacggtgttactcgcagtgtgactaagcgttcagtcatgacgctggcttacgggtccaaagagttcggcttccgtcaacaagtgctggaagataccattcagccagctattgattccggcaagggtctgatgttcactcagccgaatcaggctgctggatacatggctaagctgatttgggaatctgtgagcgtgacggtggtagctgcggttgaagcaatgaactggcttaagtctgctgctaagctgctggctgctgaggtcaaagataagaagactggagagattcttcgcaagcgttgcgctgtgcattgggtaactcctgatggtttccctgtgtggcaggaatacaagaagcctattcagacgcgcttgaacctgatgttcctcggtcagttccgcttacagcctaccattaacaccaacaaagatagcgagattgatgcacacaaacaggagtctggtatcgctcctaactttgtacacagccaagacggtagccaccttcgtaagactgtagtgtgggcacacgagaagtacggaatcgaatcttttgcactgattcacgactccttcggtaccattccggctgacgctgcgaacctgttcaaagcagtgcgcgaaactatggttgacacatatgagtcttgtgatgtactggctgatttctacgaccagttcgctgaccagttgcacgagtctcaattggacaaaatgccagcacttccggctaaaggtaacttgaacctccgtgacatcttagagtcggacttcgcgttcgcAtaa",
-            gene_name="Pbad_rbs",
-            first_six_aas="MDTINI"
-        )
-        self.rbsOptions.extend([opt1, opt2, opt3])
-
-    def run(self, cds: str, ignores: set) -> RBSOption:
-        """
-        Selects an RBS that is not in the ignore set.
-        
         Parameters:
-            cds (str): The coding sequence.
-            ignores (set): A set of RBS options to ignore.
-        
-        Returns:
-            RBSOption: The selected RBS option.
+            rbs_option_list (Set[RBSOption]): A set of RBSOption instances.
         """
-        for rbsopt in self.rbsOptions:
-            if rbsopt not in ignores:
-                return rbsopt
-        raise Exception("No valid RBS option available.")
+        self.rbs_options = rbs_option_list
+
+    def run(self, cds: str, ignores: Set[RBSOption]) -> RBSOption:
+        """
+        A method to choose the best RBS for a given CDS sequence.
+
+        Parameters:
+            cds (str): The coding sequence to analyze.
+            ignores (Set[RBSOption]): A set of RBSOption instances to exclude from consideration.
+
+        Returns:
+            RBSOption: The best RBSOption based on the specified criteria.
+        """
+        # Step 1: Check for valid length
+        if len(cds) % 3 != 0:
+            print(f"Skipping invalid CDS sequence (length not multiple of 3): {cds}")
+            return None  # Skip this sequence or raise a ValueError if needed
+
+        #Step 2: Exclude RBSOptions based on ignores
+        candidates = [option for option in self.rbs_options if option not in ignores]
+
+        print(f"Number of candidates after exclusion: {len(candidates)}")
+        # Prepare a list to hold viable candidates (those that do not form hairpins)
+        viable_candidates = []
+        for option in candidates:
+            # Combine RBS UTR and CDS for analysis
+            combined_sequence = option.utr + cds
+
+            # Check for hairpins using hairpin_counter
+            hairpin_count = hairpin_counter(combined_sequence)
+
+            # Debugging: Print hairpin counts for each option
+            print(f"RBS: {option.utr}, Hairpin Count: {hairpin_count}")
+
+            # Only keep candidates with no hairpins (or adjust logic as needed)
+            if hairpin_count == 0:
+              viable_candidates.append(option)
+
+        # Debugging: Print the number of viable candidates
+        print(f"Number of viable candidates after hairpin check: {len(viable_candidates)}")
+        # Step 3: Translate CDS to peptide
+        translator = Translate()  # Create an instance of the Translate class
+        translator.initiate()  # Initialize the translator
+        protein_sequence = translator.run(cds)  # Get the protein sequence from the CDS
+        cds_peptide = protein_sequence[:6]  # Get the first six amino acids
+
+        best_rbs = None
+        best_edit_distance = float('inf')  # Initialize with infinity for comparison
+
+        # Step 4: Compare the input peptide to the RBS source gene's peptide
+        for rbs in viable_candidates:
+            edit_distance = calculate_edit_distance(cds_peptide, rbs.first_six_aas)
+            print(f"RBS: {rbs.utr}, Edit Distance: {edit_distance}")
+
+            # Select the RBS with the smallest edit distance
+            if edit_distance < best_edit_distance:
+                best_edit_distance = edit_distance
+                best_rbs = rbs
+
+        print(f"Chosen RBS Option: {best_rbs}")
+        return best_rbs
 
 if __name__ == "__main__":
     # Example usage of RBSChooser
